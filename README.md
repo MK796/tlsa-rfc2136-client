@@ -2,32 +2,58 @@
 
 Interactive and automation-friendly TLSA record generator and RFC2136 publisher for DANE deployments.
 
-This tool scans local certificate material, validates that a certificate matches the exact service hostname, generates TLSA records, publishes them to authoritative DNS servers with RFC2136 + TSIG, verifies the published result, and can optionally compare the live service certificate against the generated TLSA plan.
+This project is **Certbot-first** in version **1.2**:
+- the default certificate scan path is **`/etc/letsencrypt/live`**
+- the workflow is designed to work out of the box with typical **Certbot live-directory layouts**
+- you can still override the path and use any PEM/CRT/CER file or directory
 
 ## Version
 
-Current documented release: **1.1**
+Current documented release: **1.2**
 
-## What it does
+## What the tool does
 
-- Scans a certificate directory or certificate file (`.pem`, `.crt`, `.cer`)
-- Detects leaf certificates, CA certificates, and bundle/fullchain files
-- Validates the exact service hostname against the matching certificate
-- Supports all standard TLSA tuples:
+The script:
+
+- scans a certificate directory or certificate file (`.pem`, `.crt`, `.cer`)
+- detects leaf certificates, CA certificates, and bundle/fullchain files
+- validates the exact service hostname against the matching certificate
+- supports all standard TLSA tuples:
   - usage: `0..3`
   - selector: `0..1`
   - matching type: `0..2`
-- Prevents impossible tuple selections based on the available certificate material
-- Recommends practical tuples such as `3 1 1`
-- Supports an automatic sensible mode for common end-entity DANE records
-- Publishes TLSA records via RFC2136 with TSIG authentication
-- Verifies the authoritative DNS result after publication
-- Detects and automatically tries to fix the classic wrong-owner RFC2136 symptom on some servers
-- Can re-run validation without publishing again
-- Can compare the live TLS endpoint against the generated TLSA plan
-- Can export the final record set in BIND format for documentation only
-- Stores reusable RFC2136 profiles and supports create, use, edit, and delete
-- Supports non-interactive flags for automation
+- prevents impossible tuple selections based on the available certificate material
+- supports **interactive mode** for manually choosing one TLSA tuple
+- supports **auto-sensible mode** for generating sensible DANE-EE records
+- lets you choose, in auto-sensible mode, whether to publish:
+  - only the project default tuple
+  - all sensible tuples
+  - a custom subset of the sensible tuples
+- publishes TLSA records via RFC2136 with TSIG authentication
+- verifies the authoritative DNS result after publication
+- detects and automatically tries to fix the classic wrong-owner RFC2136 symptom on supported workflows
+- can re-run validation without publishing again
+- can compare the live TLS endpoint against the generated TLSA plan
+- can export the final record set in BIND format for documentation only
+- stores reusable RFC2136 profiles and supports:
+  - create
+  - use
+  - edit
+  - delete
+- supports non-interactive flags for automation
+
+## Project default tuple preference
+
+Version **1.2** changes the project preference order to:
+
+1. **`3 1 2`** — project default
+2. **`3 1 1`** — alternative recommendation
+3. **`3 0 1`** — additional sensible option
+
+Important:
+- this default is a **project choice**
+- it is **not** a protocol limitation
+- both `3 1 2` and `3 1 1` are supported equally by the tool
 
 ## Important TLSA scope note
 
@@ -79,6 +105,7 @@ tlsa-rfc2136-client/
 ├── tlsa_rfc2136_interactive.py
 ├── README.md
 ├── CHANGELOG.md
+├── LICENSE
 ├── requirements.txt
 ├── .gitignore
 └── tests/
@@ -87,11 +114,17 @@ tlsa-rfc2136-client/
 
 ## Supported command-line flags
 
+Output from `python3 tlsa_rfc2136_interactive.py --help` is reflected here.
+
 ### Core behavior
 
+- `-h`, `--help`
+  - Show help and exit
+
 - `--dry-run`
-  - Generate and validate locally only
-  - Skips RFC2136 publication and authoritative DNS verification
+  - Generate and validate locally
+  - Skip RFC2136 publication
+  - Skip authoritative DNS verification
 
 - `--validate-only`
   - Skip RFC2136 publication
@@ -99,24 +132,26 @@ tlsa-rfc2136-client/
   - Query authoritative DNS and validate what is already published
 
 - `--mode interactive`
-  - Manual workflow
+  - Manual single-plan workflow
   - Lets you choose the certificate material and TLSA tuple
 
 - `--mode auto-sensible`
-  - Automatic workflow
-  - Generates a practical DANE-EE record set from matching leaf certificates
-  - Sensible tuples currently used:
-    - `3 1 1`
-    - `3 1 2`
-    - `3 0 1`
+  - Automatic bulk workflow
+  - Selects matching leaf certificates by key family
+  - Then prompts you to publish:
+    - only the project default tuple (`3 1 2`)
+    - all sensible tuples (`3 1 2`, `3 1 1`, `3 0 1`)
+    - or a custom subset of those sensible tuples
 
 ### Non-interactive input flags
 
 - `--config-file PATH`
-  - Path to the RFC2136 profile config file
+  - Path to the saved RFC2136 profile config file
 
 - `--cert-path PATH`
   - Certificate directory or certificate file to scan
+  - If you do not supply this, the interactive prompt defaults to:
+    - `/etc/letsencrypt/live`
 
 - `--host NAME`
   - Exact service hostname
@@ -150,33 +185,222 @@ tlsa-rfc2136-client/
 - `--verbose`
   - Enable verbose logging
 
-## Typical commands
+## Interactive workflow
 
-Interactive dry run:
+### 1. Certificate path
+
+If you do not provide `--cert-path`, the script prompts for a path and defaults to:
+
+```text
+/etc/letsencrypt/live
+```
+
+That makes the default workflow convenient for Certbot-managed systems.
+
+### 2. Host / service input
+
+The tool asks for:
+
+- exact service host
+- service port
+- transport (`tcp`, `udp`, or `sctp`)
+- TTL
+
+It then builds the TLSA owner name in the usual form:
+
+```text
+_<port>._<transport>.<host>.
+```
+
+Example:
+
+```text
+_5061._tcp.pbx.example.com.
+```
+
+### 3. TLSA scope reminder
+
+The script prints a reminder explaining that the generated TLSA owner name applies only to the exact service endpoint.
+
+### 4. Certificate discovery
+
+The script scans the supplied certificate path and looks for PEM-style certificates. It groups discovered material into:
+- leaf certificates
+- CA certificates
+- bundles/fullchains
+
+Only materials that contain a leaf certificate matching the exact service hostname can be selected for end-entity TLSA generation.
+
+### 5. Tuple selection behavior
+
+#### In interactive mode
+
+The script:
+- shows the TLSA capability mask for the selected material
+- lists all standard tuples that are possible with that material
+- lists recommended tuples
+- defaults to **`3 1 2`** if possible
+- offers **`3 1 1`** as the alternative recommendation
+- still lets you manually choose any valid tuple supported by the material
+
+#### In auto-sensible mode
+
+The script:
+- finds the best matching leaf material by key family
+- prints a summary of the automatically chosen certificate material
+- lets you choose what to publish:
+  - **Default only**
+    - publish only `3 1 2`
+  - **All sensible tuples**
+    - publish `3 1 2`, `3 1 1`, `3 0 1`
+  - **Custom subset**
+    - choose one or more of those tuples manually
+
+This is especially useful in environments with multiple certificate families, such as RSA and ECDSA.
+
+## RFC2136 profile handling
+
+The tool stores reusable RFC2136 / TSIG settings in a JSON config file.
+
+Default location:
+
+```text
+~/.config/tlsa-rfc2136/config.json
+```
+
+Typical stored values include:
+
+- profile name
+- authoritative DNS server list
+- DNS port
+- zone
+- TSIG key name
+- TSIG key secret
+- TSIG algorithm
+- timeout
+- default TTL
+- verification attempts / delay
+- whether updates should be sent to all configured servers
+
+The interactive profile menu supports:
+- use a saved profile
+- create a new profile
+- edit a saved profile
+- delete a saved profile
+
+Because the file contains the TSIG secret, it should stay protected.
+
+## Publication and verification
+
+### RFC2136 publication
+
+The script:
+1. creates one or more TLSA plans
+2. publishes the RRset via RFC2136 using TSIG
+3. reports per-server update status
+
+### Authoritative DNS verification
+
+After publication, the script:
+- directly queries the configured authoritative nameserver(s)
+- compares the returned TLSA RRset against the generated plans
+- reports:
+  - `OK`
+  - `MISMATCH`
+  - `QUERY FAILED`
+
+### Wrong-owner auto-correction
+
+The script includes wrong-owner detection and recovery logic for the common doubled-owner problem, where a server may end up with something like:
+
+```text
+_5061._tcp.pbx.example.com.example.com
+```
+
+When the symptom is detected in supported workflows, the tool can:
+- detect the wrong owner
+- remove it
+- republish the correct owner
+- verify again
+
+### Validate-only mode
+
+`--validate-only` lets you:
+- skip publication
+- regenerate the expected TLSA plan(s)
+- query authoritative DNS
+- confirm whether the live authoritative data matches the expected data
+
+This is useful after:
+- propagation
+- manual DNS changes
+- scripted renewals
+- troubleshooting
+
+## Live TLS endpoint verification
+
+The live check:
+- opens a real TLS connection to the target host and port
+- reads the currently presented server certificate
+- compares the tuple-aware TLSA association of the live certificate with the generated plan(s)
+
+This is stronger than only comparing whole certificate fingerprints and is useful for checking whether the running service really matches the generated TLSA data.
+
+## Documentation export
+
+At the end, the tool can write the generated TLSA RRset to a BIND-style text file.
+
+Example line:
+
+```text
+_5061._tcp.pbx.example.com. 3600 IN TLSA 3 1 2 <association-data>
+```
+
+This export is:
+- optional
+- for documentation/reference
+- not used by the script for publication
+
+## Tests
+
+The repository includes unit tests for core logic, including:
+- wildcard hostname matching
+- TLSA tuple handling
+- RFC2136 owner-name handling
+
+Run them with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+## Example commands
+
+### Interactive dry run
 
 ```bash
 python3 tlsa_rfc2136_interactive.py --dry-run
 ```
 
-Interactive publish:
+### Interactive publish
 
 ```bash
 python3 tlsa_rfc2136_interactive.py --mode interactive
 ```
 
-Auto-sensible dry run:
+### Auto-sensible dry run
 
 ```bash
 python3 tlsa_rfc2136_interactive.py --dry-run --mode auto-sensible
 ```
 
-Validation only against authoritative DNS:
+### Validation only against authoritative DNS
 
 ```bash
 python3 tlsa_rfc2136_interactive.py --validate-only --mode interactive
 ```
 
-Automated dry run with all main parameters supplied:
+### Automated dry run with all main parameters supplied
 
 ```bash
 python3 tlsa_rfc2136_interactive.py \
@@ -191,7 +415,7 @@ python3 tlsa_rfc2136_interactive.py \
   --no-live-check
 ```
 
-Automated validation-only run using a saved profile:
+### Automated validation-only run using a saved profile
 
 ```bash
 python3 tlsa_rfc2136_interactive.py \
@@ -208,157 +432,35 @@ python3 tlsa_rfc2136_interactive.py \
   --live-check
 ```
 
-## How the script works
-
-### 1. Certificate discovery
-
-The script scans the supplied certificate path and looks for PEM-style certificates. It groups discovered material into:
-- leaf certificates
-- CA certificates
-- bundles/fullchains
-
-Only materials that contain a leaf certificate matching the exact service hostname can be selected for end-entity TLSA generation.
-
-### 2. Host validation
-
-The hostname is validated against the certificate SAN entries and, if needed, the common name. Wildcards are supported for one label, such as `*.example.com` matching `pbx.example.com`.
-
-### 3. TLSA planning
-
-In interactive mode, the script:
-- shows which TLSA tuples are possible
-- blocks impossible combinations
-- recommends common tuples
-
-In auto-sensible mode, it generates a practical DANE-EE RRset automatically.
-
-### 4. Local self-check
-
-Before any DNS publication, the script verifies that the generated TLSA data matches the selected certificate material.
-
-### 5. RFC2136 profile handling
-
-The script stores reusable profiles for DNS updates. Profiles contain:
-- nameserver list
-- zone
-- TSIG key name
-- TSIG secret
-- TSIG algorithm
-- timeout
-- default TTL
-- verification retry settings
-
-Profiles can be created, reused, edited, and deleted.
-
-Default config file location:
-
-```text
-~/.config/tlsa-rfc2136/config.json
-```
-
-### 6. RFC2136 publication
-
-When not using `--dry-run` or `--validate-only`, the script publishes the TLSA RRset using RFC2136 dynamic updates over TCP with TSIG authentication.
-
-It sends owner names relative to the configured zone to avoid the doubled-owner problem seen on some DNS servers.
-
-### 7. Authoritative verification
-
-After publication, the script queries the configured authoritative servers directly and compares the returned TLSA RRset with the expected result.
-
-If the classic wrong-owner symptom is detected, the script attempts to:
-- delete the wrong owner
-- republish the correct owner
-- verify again
-
-### 8. Live TLS endpoint validation
-
-If enabled, the script opens a real TLS connection to the target service and regenerates tuple-aware TLSA associations from the live certificate. This is more accurate than simply comparing whole certificate fingerprints.
-
-### 9. Documentation export
-
-The BIND export is optional and for documentation only. It is not used for publication.
-
-## TLSA recommendations
-
-The script recommends these practical tuples when possible:
-
-- `3 1 1`
-  - Common default
-  - End-entity cert
-  - SPKI selector
-  - SHA-256 matching
-
-- `3 1 2`
-  - Like `3 1 1`, but SHA-512
-
-- `3 0 1`
-  - Pins the whole leaf certificate instead of only the public key
-
-- `2 1 1`
-  - Useful when you intentionally want DANE-TA from a CA public key in the scanned bundle
-
-## Profile management
-
-The interactive profile menu supports:
-- use a saved profile
-- create a new profile
-- edit a saved profile
-- delete a saved profile
-
-You can also skip the menu in automation with:
+### Verbose troubleshooting run
 
 ```bash
---profile PROFILE_NAME
+python3 tlsa_rfc2136_interactive.py --verbose
 ```
 
-## Testing
+## Exit behavior
 
-Syntax check:
+The script uses these exit codes:
 
-```bash
-python3 -m py_compile tlsa_rfc2136_interactive.py
-```
+- `0`
+  - success
 
-Run unit tests:
+- `1`
+  - general runtime error
 
-```bash
-python3 -m unittest discover -s tests -v
-```
+- `2`
+  - publication or validation completed, but one or more verification checks still failed
 
-The included tests cover:
-- wildcard hostname matching
-- TLSA tuple generation logic
-- RFC2136 owner-name handling
+- `130`
+  - interrupted by user (`Ctrl+C`)
 
-## Exit codes
+## Notes
 
-- `0` = success
-- `1` = general error
-- `2` = publication and/or validation did not fully succeed
-- `130` = interrupted by user
+- The tool is optimized for **Certbot live directories**, but it is not limited to Certbot.
+- Private key files that do not contain certificates are skipped automatically.
+- Publication verification checks the authoritative DNS result, not just local generation.
+- The v1.2 default preference for `3 1 2` is a **project preference**, not a DANE protocol requirement.
 
-## Security notes
+## Version note
 
-- TSIG secrets are hidden during input
-- TSIG secrets are stored in the local config file if you save a profile
-- The script validates TSIG secrets as Base64 at input time
-- Keep the config file private
-- Do not commit saved RFC2136 profile files to Git
-
-## Known operational notes
-
-- Live endpoint validation currently only applies to `tcp`
-- `--validate-only` is ideal after waiting for propagation or after correcting records manually
-- DNSSEC is still required for real DANE validation by clients
-- The documentation export does not change publication behavior
-
-## Example output
-
-```text
-_5061._tcp.pbx.mk-homelab.net. 3600 IN TLSA 3 1 1 <association-data>
-```
-
-## License
-
-MIT License
+This README reflects the corrected **v1.2** behavior expected from the v1.1 base script with all prior v1.1 functionality preserved and the requested v1.2 defaults applied.

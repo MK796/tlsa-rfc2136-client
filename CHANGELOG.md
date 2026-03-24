@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2] - 2026-03-24
+
+### Added
+- Certbot-first default certificate path prompt:
+  - `/etc/letsencrypt/live`
+- Auto-sensible tuple publication selection:
+  - publish only the project default
+  - publish all sensible tuples
+  - publish a custom subset of sensible tuples
+
+### Changed
+- Project default tuple preference changed to **`3 1 2`** whenever possible
+- `3 1 1` remains the alternative recommendation
+- `3 0 1` remains part of the sensible tuple set
+- Startup/help wording now describes the tool as optimized for Certbot-style live directories
+- README expanded to fully document:
+  - all CLI arguments
+  - all core script functions
+  - profile management
+  - validation flows
+  - auto-sensible behavior
+  - usage examples
+  - exit behavior
+
+### Notes
+- The new default of `3 1 2` is a **project preference**, not a protocol requirement
+- The tool still accepts arbitrary PEM/CRT/CER paths when you do not want to use the default Certbot path
+- The intended v1.2 behavior is to build on the v1.1 feature set without removing existing functionality
+
 ## [1.1] - 2026-03-24
 
 ### Added
