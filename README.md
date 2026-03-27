@@ -61,6 +61,29 @@ tlsa-rfc2136-client/
 - `cryptography`
 - `dnspython`
 
+## Download the repository
+
+### Option 1: Clone with Git
+
+```bash
+git clone https://github.com/MK796/tlsa-rfc2136-client.git
+cd tlsa-rfc2136-client
+```
+
+### Option 2: Download as ZIP
+
+1. Open the repository on GitHub
+2. Click **Code**
+3. Click **Download ZIP**
+4. Extract the archive
+5. Change into the extracted directory
+
+Example:
+
+```bash
+cd /path/to/tlsa-rfc2136-client
+```
+
 ## Installation
 
 ### Install from a source checkout
