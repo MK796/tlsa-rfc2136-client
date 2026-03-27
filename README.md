@@ -371,19 +371,6 @@ This export is:
 - for documentation/reference
 - not used by the script for publication
 
-## Tests
-
-The repository includes unit tests for core logic, including:
-- wildcard hostname matching
-- TLSA tuple handling
-- RFC2136 owner-name handling
-
-Run them with:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
 ## Example commands
 
 ### Interactive dry run
