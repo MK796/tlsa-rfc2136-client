@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3] - 2026-03-27
+
+### Added
+- `--tuples {default,all}` flag for `--mode auto-sensible`:
+  - `default` — publish only `3 1 2` without prompting
+  - `all` — publish `3 1 2`, `3 1 1`, and `3 0 1` without prompting
+  - When combined with `--mode auto-sensible`, `--profile`, `--cert-path`, `--host`, `--port`, `--transport`, `--ttl`, `--no-export`, and `--no-live-check`, the script runs fully unattended with no interactive prompts
+  - Only valid with `--mode auto-sensible`; validated at startup
+
+### Changed
+- Auto-sensible mode now accepts a single cert **file** via `--cert-path`, not just a directory. When a file path is given, it is used directly without the per-key-family scoring logic
+- Auto-sensible mode now prefers wildcard certificates (e.g. `*.example.com`) over exact-match host certificates when multiple materials of the same key family are found during a directory scan
+- Terminal line editing improved on both macOS and Linux:
+  - Backspace now works in all interactive `input()`-based prompts
+  - Arrow keys (cursor movement and history navigation) now work on macOS (libedit) and Linux (GNU readline)
+
 ## [1.2] - 2026-03-24
 
 ### Added

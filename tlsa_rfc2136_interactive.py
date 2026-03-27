@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Interactive TLSA generator + RFC2136 publisher.
@@ -27,10 +26,24 @@ import json
 import logging
 import os
 import re
+import readline  # noqa: F401 — enables line-editing in input() prompts
 import socket
 import ssl
 import sys
 import time
+
+# Enable full line-editing (backspace, arrow keys, history) for all input() prompts.
+# libedit (macOS default) needs emacs mode set explicitly; GNU readline (Linux)
+# gets explicit arrow-key bindings as a safety net against ~/.inputrc overrides.
+if "libedit" in getattr(readline, "__doc__", ""):
+    readline.parse_and_bind("bind -e")
+else:
+    readline.parse_and_bind("set editing-mode emacs")
+    readline.parse_and_bind('"\\e[A": previous-history')
+    readline.parse_and_bind('"\\e[B": next-history')
+    readline.parse_and_bind('"\\e[C": forward-char')
+    readline.parse_and_bind('"\\e[D": backward-char')
+
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -189,6 +202,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--live-check", action="store_true", help="Run the live TLS endpoint check without prompting")
     parser.add_argument("--no-live-check", action="store_true", help="Skip the optional live TLS endpoint check")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument(
+        "--tuples",
+        choices=["default", "all"],
+        help="In auto-sensible mode: which tuples to publish without prompting. "
+             "'default' = 3 1 2 only (project default); 'all' = 3 1 2 + 3 1 1 + 3 0 1. "
+             "If omitted, prompts interactively. Only valid with --mode auto-sensible.",
+    )
     args = parser.parse_args()
     if args.live_check and args.no_live_check:
         parser.error("--live-check and --no-live-check cannot be used together")
@@ -200,6 +220,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--ttl must be greater than or equal to 0")
     if args.dry_run and args.validate_only:
         parser.error("--dry-run and --validate-only cannot be used together")
+    if args.tuples and args.mode != "auto-sensible":
+        parser.error("--tuples is only valid with --mode auto-sensible")
     return args
 
 
@@ -793,7 +815,11 @@ def build_plan(material: CertificateMaterial, leaf_cert: x509.Certificate, assoc
     )
 
 
-def choose_auto_sensible_tuples() -> list[tuple[int, int, int]]:
+def choose_auto_sensible_tuples(preselected: str | None = None) -> list[tuple[int, int, int]]:
+    if preselected == "default":
+        return [(3, 1, 2)]
+    if preselected == "all":
+        return list(AUTO_SENSIBLE_TUPLES)
     print("\nAuto-sensible tuple selection")
     print("  Project default : 3 1 2")
     print("  Alternative     : 3 1 1")
@@ -830,12 +856,14 @@ def choose_best_matching_materials_by_family(materials: list[CertificateMaterial
             continue
         family = public_key_family(leaf_cert)
         current = best.get(family)
-        score = (1 if material.is_fullchain else 0, len(material.ca_certs), len(material.certs))
+        is_wildcard = any("*" in n for n in cert_dns_names(leaf_cert))
+        score = (1 if is_wildcard else 0, 1 if material.is_fullchain else 0, len(material.ca_certs), len(material.certs))
         if current is None:
             best[family] = (material, leaf_cert)
             continue
-        current_material = current[0]
-        current_score = (1 if current_material.is_fullchain else 0, len(current_material.ca_certs), len(current_material.certs))
+        current_material, current_leaf = current
+        current_is_wildcard = any("*" in n for n in cert_dns_names(current_leaf))
+        current_score = (1 if current_is_wildcard else 0, 1 if current_material.is_fullchain else 0, len(current_material.ca_certs), len(current_material.certs))
         if score > current_score:
             best[family] = (material, leaf_cert)
     family_order = {"RSA": 0, "ECDSA": 1, "Ed25519": 2, "Ed448": 3, "DSA": 4}
@@ -859,11 +887,20 @@ def run_interactive_mode(materials: list[CertificateMaterial], domain: str, owne
     return [plan]
 
 
-def run_auto_sensible_mode(materials: list[CertificateMaterial], domain: str, owner_name: str, ttl: int) -> list[TLSARecordPlan]:
-    selected = choose_best_matching_materials_by_family(materials, domain)
+def run_auto_sensible_mode(materials: list[CertificateMaterial], domain: str, owner_name: str, ttl: int, single_file: bool = False, tuples: str | None = None) -> list[TLSARecordPlan]:
+    if single_file:
+        # A specific cert file was given — use it directly without family scoring.
+        material = materials[0]
+        try:
+            leaf_cert = pick_end_entity_certificate(material, domain)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        selected: list[tuple[str, CertificateMaterial, x509.Certificate]] = [(public_key_family(leaf_cert), material, leaf_cert)]
+    else:
+        selected = choose_best_matching_materials_by_family(materials, domain)
     if not selected:
         raise RuntimeError(f"No discovered certificate material contains a matching leaf certificate for domain '{domain}'.")
-    chosen_tuples = choose_auto_sensible_tuples()
+    chosen_tuples = choose_auto_sensible_tuples(preselected=tuples)
     print("\nAutomatic bulk selection summary")
     for family, material, leaf_cert in selected:
         print(f"  {family}: {material.path}")
@@ -1297,7 +1334,7 @@ def main() -> int:
     ttl = args.ttl if args.ttl is not None else prompt_int("TTL for the TLSA RR", 3600, min_value=0)
     print_tlsa_scope_reminder(owner_name, domain, service_port, transport)
 
-    plans = run_interactive_mode(materials, domain, owner_name, ttl) if args.mode == "interactive" else run_auto_sensible_mode(materials, domain, owner_name, ttl)
+    plans = run_interactive_mode(materials, domain, owner_name, ttl) if args.mode == "interactive" else run_auto_sensible_mode(materials, domain, owner_name, ttl, single_file=cert_path.is_file(), tuples=args.tuples)
     print_record_plan_summary(plans)
 
     publication_ok = True

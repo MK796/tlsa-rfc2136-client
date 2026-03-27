@@ -1,7 +1,15 @@
+# Agent instructions (not for public distribution)
+AGENTS.md
+
+# Virtual environment
 .venv/
+
+# Python bytecode
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Editor and temp files
 *.swp
 *.tmp

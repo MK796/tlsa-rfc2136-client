@@ -2,14 +2,14 @@
 
 Interactive and automation-friendly TLSA record generator and RFC2136 publisher for DANE deployments.
 
-This project is **Certbot-first** in version **1.2**:
+This project is **Certbot-first** in version **1.3**:
 - the default certificate scan path is **`/etc/letsencrypt/live`**
 - the workflow is designed to work out of the box with typical **Certbot live-directory layouts**
 - you can still override the path and use any PEM/CRT/CER file or directory
 
 ## Version
 
-Current documented release: **1.2**
+Current documented release: **1.3**
 
 ## What the tool does
 
@@ -24,11 +24,10 @@ The script:
   - matching type: `0..2`
 - prevents impossible tuple selections based on the available certificate material
 - supports **interactive mode** for manually choosing one TLSA tuple
-- supports **auto-sensible mode** for generating sensible DANE-EE records
-- lets you choose, in auto-sensible mode, whether to publish:
-  - only the project default tuple
-  - all sensible tuples
-  - a custom subset of the sensible tuples
+- supports **auto-sensible mode** for generating sensible DANE-EE records:
+  - when scanning a directory, prefers wildcard certificates over exact-match certificates of the same key family
+  - when a cert file is given directly via `--cert-path`, uses that file without scanning the directory
+  - with `--tuples`, the tuple selection is fully non-interactive
 - publishes TLSA records via RFC2136 with TSIG authentication
 - verifies the authoritative DNS result after publication
 - detects and automatically tries to fix the classic wrong-owner RFC2136 symptom on supported workflows
@@ -40,11 +39,11 @@ The script:
   - use
   - edit
   - delete
-- supports non-interactive flags for automation
+- supports fully non-interactive operation for Certbot post-renewal hooks and other automation
 
 ## Project default tuple preference
 
-Version **1.2** changes the project preference order to:
+The project preference order is:
 
 1. **`3 1 2`** — project default
 2. **`3 1 1`** — alternative recommendation
@@ -138,7 +137,9 @@ Output from `python3 tlsa_rfc2136_interactive.py --help` is reflected here.
 - `--mode auto-sensible`
   - Automatic bulk workflow
   - Selects matching leaf certificates by key family
-  - Then prompts you to publish:
+  - Prefers wildcard certificates over exact-match certificates of the same key family when scanning a directory
+  - When a cert file is given via `--cert-path`, uses that file directly
+  - Unless `--tuples` is supplied, prompts you to publish:
     - only the project default tuple (`3 1 2`)
     - all sensible tuples (`3 1 2`, `3 1 1`, `3 0 1`)
     - or a custom subset of those sensible tuples
@@ -167,6 +168,13 @@ Output from `python3 tlsa_rfc2136_interactive.py --help` is reflected here.
 
 - `--profile NAME`
   - Select a saved RFC2136 profile by name without prompting
+
+- `--tuples default|all`
+  - Only valid with `--mode auto-sensible`
+  - Selects the tuple set to publish without prompting
+  - `default` — publish only `3 1 2`
+  - `all` — publish `3 1 2`, `3 1 1`, and `3 0 1`
+  - If omitted, the interactive tuple selection menu is shown
 
 ### Output and verification flags
 
@@ -247,8 +255,10 @@ The script:
 
 The script:
 - finds the best matching leaf material by key family
+- when scanning a directory, prefers wildcard certificates (e.g. `*.example.com`) over exact-match host certificates of the same key family
+- when a specific cert file is given via `--cert-path`, uses that file directly
 - prints a summary of the automatically chosen certificate material
-- lets you choose what to publish:
+- unless `--tuples` is supplied, prompts you to choose what to publish:
   - **Default only**
     - publish only `3 1 2`
   - **All sensible tuples**
@@ -388,10 +398,26 @@ python3 tlsa_rfc2136_interactive.py --dry-run
 python3 tlsa_rfc2136_interactive.py --mode interactive
 ```
 
-### Auto-sensible dry run
+### Auto-sensible dry run (interactive tuple selection)
 
 ```bash
 python3 tlsa_rfc2136_interactive.py --dry-run --mode auto-sensible
+```
+
+### Auto-sensible dry run (unattended, project default tuple)
+
+```bash
+python3 tlsa_rfc2136_interactive.py \
+  --dry-run \
+  --mode auto-sensible \
+  --tuples default \
+  --cert-path /etc/letsencrypt/live/example.com \
+  --host example.com \
+  --port 443 \
+  --transport tcp \
+  --ttl 3600 \
+  --no-export \
+  --no-live-check
 ```
 
 ### Validation only against authoritative DNS
@@ -400,36 +426,39 @@ python3 tlsa_rfc2136_interactive.py --dry-run --mode auto-sensible
 python3 tlsa_rfc2136_interactive.py --validate-only --mode interactive
 ```
 
-### Automated dry run with all main parameters supplied
+### Fully unattended validation (Certbot post-renewal hook style)
 
 ```bash
 python3 tlsa_rfc2136_interactive.py \
-  --dry-run \
-  --mode interactive \
-  --cert-path /etc/letsencrypt/live/mk-homelab.net \
-  --host pbx.mk-homelab.net \
-  --port 5061 \
+  --validate-only \
+  --mode auto-sensible \
+  --tuples default \
+  --config-file /root/.config/tlsa-rfc2136/config.json \
+  --profile default \
+  --cert-path /etc/letsencrypt/live/example.com \
+  --host example.com \
+  --port 443 \
   --transport tcp \
   --ttl 3600 \
   --no-export \
   --no-live-check
 ```
 
-### Automated validation-only run using a saved profile
+### Fully unattended publish (Certbot post-renewal hook style)
 
 ```bash
 python3 tlsa_rfc2136_interactive.py \
-  --validate-only \
-  --mode interactive \
+  --mode auto-sensible \
+  --tuples default \
   --config-file /root/.config/tlsa-rfc2136/config.json \
   --profile default \
-  --cert-path /etc/letsencrypt/live/mk-homelab.net \
-  --host pbx.mk-homelab.net \
-  --port 5061 \
+  --cert-path /etc/letsencrypt/live/example.com \
+  --host example.com \
+  --port 443 \
   --transport tcp \
   --ttl 3600 \
   --no-export \
-  --live-check
+  --no-live-check
 ```
 
 ### Verbose troubleshooting run
@@ -459,8 +488,5 @@ The script uses these exit codes:
 - The tool is optimized for **Certbot live directories**, but it is not limited to Certbot.
 - Private key files that do not contain certificates are skipped automatically.
 - Publication verification checks the authoritative DNS result, not just local generation.
-- The v1.2 default preference for `3 1 2` is a **project preference**, not a DANE protocol requirement.
-
-## Version note
-
-This README reflects the corrected **v1.2** behavior expected from the v1.1 base script with all prior v1.1 functionality preserved and the requested v1.2 defaults applied.
+- The `3 1 2` default preference is a **project preference**, not a DANE protocol requirement.
+- When using `--mode auto-sensible` with `--tuples` and all other automation flags, the script runs with no interactive prompts.
