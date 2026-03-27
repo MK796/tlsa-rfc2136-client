@@ -13,3 +13,4 @@ __pycache__/
 # Editor and temp files
 *.swp
 *.tmp
+.DS_Store

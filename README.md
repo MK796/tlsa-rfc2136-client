@@ -41,6 +41,35 @@ The script:
   - delete
 - supports fully non-interactive operation for Certbot post-renewal hooks and other automation
 
+ ## Requirements
+
+   * Python 3.10+
+   * `cryptography`
+   * `dnspython`
+
+## Installation as a pip package
+
+If you are installing from a source checkout:
+
+```bash
+python -m pip install .
+```
+
+Upgrade:
+
+```bash
+python -m pip install --upgrade .
+```
+
+Uninstall:
+
+```bash
+python -m pip uninstall tlsa-rfc2136-client
+```
+
+See PACKAGING.md for build and wheel instructions.
+
+
 ## Project default tuple preference
 
 The project preference order is:

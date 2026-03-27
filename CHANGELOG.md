@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-03-27
+
+### Added
+- Packaging via pyproject.toml / MANIFEST.in / PACKAGING.md
+- SECURITY.md
+- Certbot deploy-hook script
+- Optional DNSSEC/DANE sanity checks
+
+### Changed
+- Merged sanity-check functionality into tlsa_rfc2136_interactive.py
+
 ## [1.3] - 2026-03-27
 
 ### Added

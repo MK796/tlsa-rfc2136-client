@@ -1,0 +1,8 @@
+include README.md
+include CHANGELOG.md
+include LICENSE
+include requirements.txt
+include SECURITY.md
+include PACKAGING.md
+
+global-exclude __pycache__ *.py[cod] *.pyo

@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tlsa-rfc2136-client"
+version = "2.0.0"
+description = "Interactive TLSA generator + RFC2136 publisher (Certbot-first) for DANE deployments"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Marvin Kehm" }]
+keywords = ["DANE", "TLSA", "DNSSEC", "RFC2136", "TSIG", "Certbot"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "Topic :: Security",
+  "Topic :: System :: Networking",
+]
+
+dependencies = [
+  "cryptography>=41.0.0,<47",
+  "dnspython>=2.4.2,<3",
+]
+
+[project.scripts]
+tlsa-rfc2136-client = "tlsa_rfc2136_interactive:main"
+tlsa-rfc2136 = "tlsa_rfc2136_interactive:main"
+
+[project.urls]
+Homepage = "https://github.com/MK796/tlsa-rfc2136-client"
+Source = "https://github.com/MK796/tlsa-rfc2136-client"
+Changelog = "https://github.com/MK796/tlsa-rfc2136-client/blob/main/CHANGELOG.md"
+Issues = "https://github.com/MK796/tlsa-rfc2136-client/issues"
+Security = "https://github.com/MK796/tlsa-rfc2136-client/security"
+
+[tool.setuptools]
+py-modules = ["tlsa_rfc2136_interactive"]
+include-package-data = true
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.5,<1",
+  "mypy>=1.10,<2",
+  "bandit>=1.7,<2",
+]

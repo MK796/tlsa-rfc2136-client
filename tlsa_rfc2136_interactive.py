@@ -184,6 +184,90 @@ class TLSARecordPlan:
     def bind_line(self) -> str:
         return f"{ensure_absolute_name(self.owner_name)} {self.ttl} IN TLSA {self.rdata_text}"
 
+# -----------------------------------------------------------------------------
+# Sanity warnings and checks
+@dataclass(frozen=True)
+class SanityWarning:
+    code: str
+    message: str
+
+def expected_tlsa_owner(host: str, port: int, transport: str) -> str:
+    return ensure_absolute_name(f"_{port}._{transport}.{host}".rstrip("."))
+
+def sanity_check_owner(owner_name: str, host: str, port: int, transport: str) -> list[SanityWarning]:
+    exp = expected_tlsa_owner(host, port, transport)
+    if ensure_absolute_name(owner_name) != exp:
+        return [SanityWarning(
+            code="owner-mismatch",
+            message=f"TLSA owner name mismatch: expected '{exp}', got '{ensure_absolute_name(owner_name)}'. "
+                    "This can happen when host/zone values are misconfigured or doubled-owner symptoms occur."
+        )]
+    return []
+
+def sanity_check_tuple_plausibility(plans: list[TLSARecordPlan]) -> list[SanityWarning]:
+    warnings: list[SanityWarning] = []
+    has_sha512 = any(p.matching_type == 2 for p in plans)
+    has_sha256 = any(p.matching_type == 1 for p in plans)
+    if has_sha512 and not has_sha256:
+        warnings.append(SanityWarning(
+            code="tuple-compat",
+            message="You are publishing SHA-512-only TLSA records (matching type 2). "
+                    "RFC 6698 says clients MUST support SHA-256 (type 1) and SHOULD support SHA-512 (type 2). "
+                    "Consider publishing an additional SHA-256 TLSA record (e.g. 3 1 1) for broader compatibility."
+        ))
+    if any(p.usage in (0, 1) for p in plans):
+        warnings.append(SanityWarning(
+            code="usage-pkix",
+            message="Some TLSA records use PKIX usages (0/1). Ensure this matches your operational intent: "
+                    "PKIX validation still applies for these usages."
+        ))
+    return warnings
+
+def sanity_check_dnssec(profile: RFC2136Profile) -> list[SanityWarning]:
+    warnings: list[SanityWarning] = []
+    zone = ensure_absolute_name(profile.zone)
+    for server in profile.servers[:1]:
+        try:
+            q = dns.message.make_query(zone, dns.rdatatype.DNSKEY, want_dnssec=True)
+            q.flags &= ~dns.flags.RD
+            r = dns.query.tcp(q, where=server, port=profile.dns_port, timeout=profile.timeout)
+            has_dnskey = any(rrset.rdtype == dns.rdatatype.DNSKEY for rrset in r.answer)
+            has_rrsig = any(rrset.rdtype == dns.rdatatype.RRSIG for rrset in r.answer)
+            if not has_dnskey:
+                warnings.append(SanityWarning(
+                    code="dnssec-unknown",
+                    message=f"DNSSEC sanity: no DNSKEY RRset observed for zone '{zone}' from server '{server}'. "
+                            "Zone may be unsigned or query may have been filtered."
+                ))
+            elif not has_rrsig:
+                warnings.append(SanityWarning(
+                    code="dnssec-weak-signal",
+                    message=f"DNSSEC sanity: DNSKEY present for zone '{zone}', but no RRSIG observed in the answer "
+                            f"from server '{server}'. Zone signing status could not be confirmed."
+                ))
+            if not (r.flags & dns.flags.AD):
+                warnings.append(SanityWarning(
+                    code="dnssec-ad-not-set",
+                    message=f"DNSSEC sanity: AD bit not set in response from '{server}'. "
+                            "This is expected for authoritative servers; do not interpret as DNSSEC failure."
+                ))
+        except Exception as exc:
+            warnings.append(SanityWarning(
+                code="dnssec-check-failed",
+                message=f"DNSSEC sanity: DNSKEY query failed against '{server}': {exc}"
+            ))
+        break
+    return warnings
+
+def sanity_check_live_warn_only(host: str, port: int, transport: str, plans: list[TLSARecordPlan], timeout: float) -> list[SanityWarning]:
+    try:
+        status = validate_live_endpoint_against_plans(host, port, transport, plans, timeout)
+        if not status.startswith("OK"):
+            return [SanityWarning(code="live-mismatch", message=f"Live sanity: {status}")]
+        return []
+    except Exception as exc:
+        return [SanityWarning(code="live-check-failed", message=f"Live sanity: probe failed: {exc}")]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interactive TLSA generator + RFC2136 publisher")
@@ -209,7 +293,24 @@ def parse_args() -> argparse.Namespace:
              "'default' = 3 1 2 only (project default); 'all' = 3 1 2 + 3 1 1 + 3 0 1. "
              "If omitted, prompts interactively. Only valid with --mode auto-sensible.",
     )
+    parser.add_argument(
+        "--sanity-checks",
+        action="store_true",
+        help="Enable non-blocking sanity checks (DNSSEC/DANE plausibility warnings).",
+    )
+    parser.add_argument(
+        "--no-sanity",
+        action="store_true",
+        help="Disable all sanity checks.",
+    )
+    parser.add_argument(
+        "--sanity-live",
+        action="store_true",
+        help="Also perform a warn-only live TLSA-vs-live-certificate check (non-blocking).",
+    )
     args = parser.parse_args()
+    if args.sanity_checks and args.no_sanity:
+        parser.error("--sanity-checks and --no-sanity cannot be used together")
     if args.live_check and args.no_live_check:
         parser.error("--live-check and --no-live-check cannot be used together")
     if args.export_file and args.no_export:
@@ -1351,6 +1452,18 @@ def main() -> int:
             raise ValueError(f"TLSA owner name '{owner_name}' is not inside zone '{profile.zone}'.")
         print_tlsa_scope_reminder(owner_name, domain, service_port, transport, profile.zone)
 
+        # Sanity checks before publishing/verification (non-blocking warnings)
+        if not args.no_sanity:
+            warnings = []
+            warnings += sanity_check_owner(owner_name, domain, service_port, transport)
+            warnings += sanity_check_tuple_plausibility(plans)
+            if profile is not None:
+                warnings += sanity_check_dnssec(profile)
+            if args.sanity_live:
+                warnings += sanity_check_live_warn_only(domain, service_port, transport, plans, timeout=5.0)
+            for w in warnings:
+                print(f"WARNING [{w.code}]: {w.message}", file=sys.stderr)
+
     if args.dry_run:
         print("\nDry-run enabled: skipping RFC2136 publication and authoritative DNS checks.")
     else:
@@ -1422,4 +1535,3 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
-
